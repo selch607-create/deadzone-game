@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#111827">
+<title>Deadzone: Zombie Survival — Prototipo</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101820;color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;touch-action:none}
+#game{display:block;width:100vw;height:100dvh;background:#263b2b}
+#hud{position:fixed;inset:0;pointer-events:none;padding:12px;display:flex;flex-direction:column;justify-content:space-between;text-shadow:0 2px 3px #000}
+.top{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}.pill{background:#101820d9;border:1px solid #ffffff30;border-radius:14px;padding:8px 11px;font-weight:800;font-size:14px;box-shadow:0 4px 12px #0005}
+#healthWrap{width:min(42vw,190px);height:12px;background:#401d1d;border:1px solid #ffffff66;border-radius:20px;overflow:hidden;margin-top:6px}#health{height:100%;width:100%;background:linear-gradient(90deg,#ff4d4d,#ffbd4a);transition:width .15s}
+.bottom{display:flex;justify-content:space-between;align-items:end}.hint{font-size:11px;opacity:.8;background:#101820b8;padding:6px 9px;border-radius:9px}
+#stick{pointer-events:auto;width:116px;height:116px;border-radius:50%;background:#ffffff20;border:2px solid #ffffff70;position:relative;touch-action:none;box-shadow:0 4px 18px #0005}
+#nub{position:absolute;width:48px;height:48px;border-radius:50%;background:#e8f1f2cc;border:2px solid #fff;left:32px;top:32px;box-shadow:0 3px 8px #0007}
+#overlay{position:fixed;inset:0;background:linear-gradient(#08131ddd,#101820ee);display:flex;align-items:center;justify-content:center;padding:22px;z-index:5}
+.panel{width:min(440px,100%);background:#182632;border:1px solid #ffffff30;border-radius:22px;padding:24px;text-align:center;box-shadow:0 18px 60px #0009}
+h1{margin:0 0 6px;font-size:30px;letter-spacing:1px}h1 span{color:#ffb347}.sub{color:#c4d1d6;margin:0 0 18px;font-size:14px;line-height:1.45}
+button{border:0;border-radius:14px;background:linear-gradient(135deg,#ff9d38,#e85b35);color:#1c1510;font-weight:900;font-size:17px;padding:14px 22px;width:100%;box-shadow:0 5px 0 #913b28;cursor:pointer}
+.small{font-size:12px;color:#9fb0b9;line-height:1.5;margin-top:15px}
+#sound{pointer-events:auto;background:#101820d9;border:1px solid #ffffff40;color:white;border-radius:12px;padding:8px 10px;font-size:12px;width:auto;box-shadow:none}
+@media(min-width:700px){#stick{width:130px;height:130px}#nub{left:39px;top:39px}}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+ <div class="top">
+  <div class="pill">❤️ <span id="hpText">100</span><div id="healthWrap"><div id="health"></div></div></div>
+  <div class="pill">OLEADA <span id="wave">1</span><br>🧟 <span id="left">0</span> restantes</div>
+  <div class="pill">⭐ <span id="score">0</span></div>
+ </div>
+ <div class="bottom">
+  <div id="stick"><div id="nub"></div></div>
+  <div class="hint">Muévete con el joystick.<br>Disparas automáticamente.</div>
+ </div>
+</div>
+<div id="overlay">
+ <div class="panel">
+  <h1>DEAD<span>ZONE</span></h1>
+  <p class="sub" id="intro">Zombie Survival · Prototipo jugable<br>Sobrevive a las oleadas y no dejes que te rodeen.</p>
+  <button id="play">JUGAR</button>
+  <div class="small">Versión de prueba para Android · Controles táctiles<br>Arte y mecánicas provisionales; todavía no es la versión 3D final.</div>
+ </div>
+</div>
+<script>
+(()=>{
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+let W=0,H=0,dpr=1,playing=false,last=0,player,zombies=[],bullets=[],particles=[],wave=1,score=0,spawned=0,need=0,spawnTimer=0,shotTimer=0,gameOver=false;
+const ui={hp:document.getElementById('hpText'),health:document.getElementById('health'),wave:document.getElementById('wave'),left:document.getElementById('left'),score:document.getElementById('score'),overlay:document.getElementById('overlay'),play:document.getElementById('play'),intro:document.getElementById('intro')};
+function resize(){dpr=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;canvas.width=W*dpr;canvas.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0)}
+addEventListener('resize',resize);resize();
+const stick=document.getElementById('stick'),nub=document.getElementById('nub');let joy={x:0,y:0,active:false,id:null};
+function setJoy(e){const r=stick.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2;let dx=e.clientX-cx,dy=e.clientY-cy,m=Math.hypot(dx,dy),max=39;if(m>max){dx=dx/m*max;dy=dy/m*max}joy.x=dx/max;joy.y=dy/max;nub.style.transform=`translate(${dx}px,${dy}px)`}
+stick.addEventListener('pointerdown',e=>{e.preventDefault();joy.active=true;joy.id=e.pointerId;stick.setPointerCapture(e.pointerId);setJoy(e)});
+stick.addEventListener('pointermove',e=>{if(joy.active&&e.pointerId===joy.id)setJoy(e)});
+function endJoy(e){if(e.pointerId===joy.id){joy.active=false;joy.x=joy.y=0;nub.style.transform='translate(0,0)'}}
+stick.addEventListener('pointerup',endJoy);stick.addEventListener('pointercancel',endJoy);
+function reset(){player={x:W/2,y:H/2,r:17,hp:100,inv:0};zombies=[];bullets=[];particles=[];wave=1;score=0;spawned=0;need=7;spawnTimer=.5;shotTimer=0;gameOver=false;playing=true;ui.overlay.style.display='none';ui.play.textContent='VOLVER A JUGAR';last=performance.now();requestAnimationFrame(loop)}
+ui.play.onclick=()=>{if(!playing)reset()};
+function spawnZombie(){let a=Math.random()*Math.PI*2,dist=Math.max(W,H)*.62;let x=player.x+Math.cos(a)*dist,y=player.y+Math.sin(a)*dist;let type=Math.random()<Math.min(.25+wave*.025,.5)?'runner':'walker';let hp=type==='runner'?1:2;zombies.push({x,y,r:type==='runner'?13:17,hp,max:hp,speed:(type==='runner'?72:38)+wave*2,type,hit:0});spawned++}
+function nearest(){let best=null,bd=430*430;for(const z of zombies){let d=(z.x-player.x)**2+(z.y-player.y)**2;if(d<bd){bd=d;best=z}}return best}
+function burst(x,y,color,n=7){for(let i=0;i<n;i++){let a=Math.random()*Math.PI*2,s=25+Math.random()*90;particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.35+Math.random()*.35,color})}}
+function update(dt){
+ if(!playing)return;
+ const speed=205;player.x+=joy.x*speed*dt;player.y+=joy.y*speed*dt;player.x=Math.max(25,Math.min(W-25,player.x));player.y=Math.max(65,Math.min(H-45,player.y));player.inv=Math.max(0,player.inv-dt);
+ spawnTimer-=dt;if(spawned<need&&spawnTimer<=0){spawnZombie();spawnTimer=Math.max(.28,1.1-wave*.035)}
+ const target=nearest();shotTimer-=dt;
+ if(target&&shotTimer<=0){let dx=target.x-player.x,dy=target.y-player.y,d=Math.hypot(dx,dy)||1;bullets.push({x:player.x+dx/d*16,y:player.y+dy/d*16,vx:dx/d*520,vy:dy/d*520,life:.8});shotTimer=.34}
+ for(let i=bullets.length-1;i>=0;i--){let b=bullets[i];b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;let hit=false;for(let j=zombies.length-1;j>=0;j--){let z=zombies[j];if(Math.hypot(b.x-z.x,b.y-z.y)<z.r+5){z.hp--;z.hit=.12;burst(b.x,b.y,'#ffd166',3);hit=true;if(z.hp<=0){burst(z.x,z.y,'#83bd63',10);zombies.splice(j,1);score+=z.type==='runner'?15:10}break}}if(hit||b.life<=0)bullets.splice(i,1)}
+ for(const z of zombies){let dx=player.x-z.x,dy=player.y-z.y,d=Math.hypot(dx,dy)||1;if(d>player.r+z.r-3){z.x+=dx/d*z.speed*dt;z.y+=dy/d*z.speed*dt}else if(player.inv<=0){player.hp-=z.type==='runner'?13:9;player.inv=.55;burst(player.x,player.y,'#ff6b6b',5)}z.hit=Math.max(0,z.hit-dt)}
+ for(let i=particles.length-1;i>=0;i--){let p=particles[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;if(p.life<=0)particles.splice(i,1)}
+ if(spawned>=need&&zombies.length===0){wave++;spawned=0;need=7+wave*3;spawnTimer=2}
+ if(player.hp<=0){player.hp=0;playing=false;gameOver=true;ui.overlay.style.display='flex';ui.intro.innerHTML=`Has caído en la oleada ${wave}.<br>Puntuación: ${score}. ¿Intentamos otra vez?`}
+ ui.hp.textContent=Math.ceil(player.hp);ui.health.style.width=player.hp+'%';ui.wave.textContent=wave;ui.left.textContent=(need-spawned)+zombies.length;ui.score.textContent=score;
+}
+function ellipse(x,y,rx,ry,color){ctx.fillStyle=color;ctx.beginPath();ctx.ellipse(x,y,rx,ry,0,0,Math.PI*2);ctx.fill()}
+function draw(){
+ ctx.clearRect(0,0,W,H);ctx.fillStyle='#304a34';ctx.fillRect(0,0,W,H);
+ // arena grass tiles
+ let tile=58;for(let y=0;y<H;y+=tile)for(let x=0;x<W;x+=tile){ctx.fillStyle=((Math.floor(x/tile)+Math.floor(y/tile))%2)?'#345238':'#38583b';ctx.fillRect(x,y,tile-1,tile-1)}
+ // scattered stones and weeds
+ for(let i=0;i<34;i++){let x=(i*137+47)%W,y=(i*211+83)%H;ctx.fillStyle='#253d2b';ctx.beginPath();ctx.arc(x,y,2+(i%4),0,7);ctx.fill()}
+ // outer boundary
+ ctx.strokeStyle='#182a22';ctx.lineWidth=12;ctx.strokeRect(4,4,W-8,H-8);
+ for(const p of particles){ctx.globalAlpha=Math.max(0,p.life);ellipse(p.x,p.y,3,3,p.color)}ctx.globalAlpha=1;
+ for(const b of bullets){ellipse(b.x,b.y,5,5,'#ffe08a');ellipse(b.x-1,b.y-1,2,2,'#fff8d4')}
+ for(const z of zombies){
+   ellipse(z.x,z.y+12,z.r*1.1,z.r*.5,'#17251c88');
+   // feet and body cartoon
+   ellipse(z.x-7,z.y+10,5,8,'#354c38');ellipse(z.x+7,z.y+10,5,8,'#354c38');
+   ellipse(z.x,z.y,z.r,z.r*.9,z.hit>0?'#d9f5a4':(z.type==='runner'?'#9bba54':'#78a84c'));
+   ellipse(z.x-5,z.y-3,3,3,'#f5f0d0');ellipse(z.x+5,z.y-3,3,3,'#f5f0d0');
+   ellipse(z.x-5,z.y-3,1.5,2,'#202820');ellipse(z.x+5,z.y-3,1.5,2,'#202820');
+   ctx.strokeStyle='#243527';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(z.x-4,z.y+7);ctx.lineTo(z.x+4,z.y+7);ctx.stroke();
+ }
+ if(player){
+   ellipse(player.x,player.y+14,20,9,'#17251c99');
+   // character body and backpack
+   ctx.save();if(player.inv>0&&Math.floor(performance.now()/80)%2===0)ctx.globalAlpha=.45;
+   ellipse(player.x-12,player.y+2,7,10,'#754b2c');
+   ellipse(player.x,player.y,16,18,'#e0a34b');
+   ellipse(player.x,player.y-12,11,11,'#f1c58a');
+   ellipse(player.x-4,player.y-14,2,2,'#202020');ellipse(player.x+4,player.y-14,2,2,'#202020');
+   // gun
+   ctx.fillStyle='#303943';ctx.save();ctx.translate(player.x+12,player.y-3);ctx.rotate(-.35);ctx.fillRect(0,-3,18,6);ctx.fillStyle='#111820';ctx.fillRect(13,-2,9,4);ctx.restore();
+   ctx.restore();
+ }
+}
+function loop(t){if(!playing)return;let dt=Math.min((t-last)/1000,.04);last=t;update(dt);draw();if(playing)requestAnimationFrame(loop)}
+draw();
+})();
+</script>
+</body>
+</html>
